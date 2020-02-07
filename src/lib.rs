@@ -477,8 +477,7 @@ pub type LLVMDiagnosticHandler =
 pub type LLVMYieldCallback = Option<extern "C" fn(arg1: LLVMContextRef, arg2: *mut ::libc::c_void)>;
 
 #[cfg(all(not(doc),LLVM_SYS_NOT_FOUND))]
-std::compile_error!(concat!(
-"No suitable version of LLVM was found system-wide or pointed
+std::compile_error!(concat!("No suitable version of LLVM was found system-wide or pointed
            to by LLVM_SYS_", env!("CARGO_PKG_VERSION_MAJOR"), "_ENV.
           
            Consider using `llvmenv` to compile an appropriate copy of LLVM, and
