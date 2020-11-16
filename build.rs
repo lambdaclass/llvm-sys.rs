@@ -79,8 +79,20 @@ fn locate_llvm_config() -> Option<PathBuf> {
     let prefix = env::var_os(&*ENV_LLVM_PREFIX)
         .map(|p| PathBuf::from(p).join("bin"))
         .unwrap_or_else(PathBuf::new);
-    for binary_name in &*LLVM_CONFIG_BINARY_NAMES {
-        let binary_name = prefix.join(binary_name);
+
+    let binary_names = (&*LLVM_CONFIG_BINARY_NAMES)
+        .iter()
+        .map(|name| prefix.join(name));
+
+    #[cfg(target_os = "windows")]
+    let binary_names = binary_names.chain((&*LLVM_CONFIG_BINARY_NAMES).iter().map(|name| {
+        let mut name = prefix.join(name);
+        name.set_extension("exe");
+
+        name
+    }));
+
+    for binary_name in binary_names {
         match llvm_version(&binary_name) {
             Ok(ref version) if is_compatible_llvm(version) => {
                 // Compatible version found. Nice.
