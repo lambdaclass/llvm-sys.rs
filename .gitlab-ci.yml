@@ -5,10 +5,8 @@ variables:
   after_script:
     - tail *.log
   artifacts:
-    expire_in: 3 months
     paths:
       - '*.log'
-    public: true
     when: always
   dependencies: []
   script:
