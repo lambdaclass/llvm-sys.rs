@@ -36,14 +36,14 @@ test:alpine:
   image: rust:alpine
   before_script:
     - apk update
-    - apk add $DEPENDENCIES_OS
+    - apk add build-base libffi-dev libstdc++-dev llvm16 llvm16-dev musl-dev $DEPENDENCIES_OS
   extends:
     - .build_definition
   parallel:
     matrix:
-      - DEPENDENCIES_OS: ['build-base gcompat libffi-dev libgcc libstdc++-dev libxml2-dev llvm16 llvm16-dev musl-dev ncurses-dev xz-libs zlib-dev zstd-dev']
+      - DEPENDENCIES_OS: ['gcompat libgcc libxml2-dev ncurses-dev xz-libs zlib-dev zstd-dev']
         FEATURES_CARGO: 'force-dynamic'
         RUSTFLAGS: ['-C target-feature=-crt-static']
-      - DEPENDENCIES_OS: ['build-base libffi-dev libstdc++-dev libxml2-static llvm16 llvm16-dev llvm16-static musl-dev ncurses-static xz-static zlib-static zstd-static']
+      - DEPENDENCIES_OS: ['libxml2-static llvm16-static ncurses-static xz-static zlib-static zstd-static']
         FEATURES_CARGO: 'force-static'
         RUSTFLAGS: ['-C target-feature=+crt-static']
