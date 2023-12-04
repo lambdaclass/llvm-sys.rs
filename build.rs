@@ -365,6 +365,10 @@ fn get_implicit_dependencies() -> [Option<String>; 3] {
 
 /// Get the library that must be linked for C++, if any.
 fn get_system_libcpp() -> Option<&'static str> {
+    if cfg!(target_feature = "crt-static") {
+        println!("cargo:rustc-link-arg=-static-libgcc");
+        println!("cargo:rustc-link-arg=-lgcc");
+    };
     if target_env_is("msvc") {
         // MSVC doesn't need an explicit one.
         None
@@ -643,11 +647,8 @@ fn main() {
         println!("cargo:rustc-link-search=native=/usr/local/lib");
     }
     let sys_lib_kind = if cfg!(target_feature = "crt-static") {
-        println!("cargo:rustc-link-arg=-static-libgcc");
-        println!("cargo:rustc-link-arg=-lgcc");
         LibraryKind::Static
     } else {
-        println!("cargo:rustc-link-arg=-lstdc++");
         LibraryKind::Dynamic
     };
     // We need to take note of what kind of libraries we linked to, so that
