@@ -656,11 +656,6 @@ fn main() {
     let (kind, libs) = get_link_libraries(&llvm_config_path, &preferences);
     for name in get_system_libraries(&llvm_config_path, kind) {
         println!("cargo:rustc-link-lib={}={name}", sys_lib_kind.string());
-        // println!("cargo:rustc-link-arg-examples=-l{name}");
-        // // TODO: Doesn't detect integration or unit tests with rustc 1.74.0 (79e9716c9 2023-11-13).
-        // println!("cargo:rustc-link-arg-tests=-l{name}");
-        // // So add this general flag at the risk of breakage when binaries are added to this crate.
-        // println!("cargo:rustc-link-arg=-l{name}");
     }
 
     let use_debug_msvcrt = env::var_os(&*ENV_USE_DEBUG_MSVCRT).is_some();
