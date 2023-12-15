@@ -33,7 +33,7 @@ test:debian:
 
 # Dynamically or statically linked Alpine Linux build, using musl.
 test:alpine:
-  image: rust:alpine
+  image: rust:alpine3.18
   before_script:
     - apk update
     - apk add build-base libffi-dev libstdc++-dev llvm16 llvm16-dev musl-dev $DEPENDENCIES_OS
