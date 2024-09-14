@@ -4,16 +4,17 @@ extern crate cc;
 extern crate lazy_static;
 extern crate regex_lite;
 extern crate semver;
+extern crate which;
 
 use std::env;
-use std::ffi::OsStr;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use anyhow::Context as _;
+use anyhow::Context;
 use regex_lite::Regex;
 use semver::Version;
+use which::which;
 
 // Environment variables that can guide compilation
 //
@@ -222,11 +223,7 @@ fn is_compatible_llvm(llvm_version: &Version) -> bool {
 }
 
 /// Invoke the specified binary as llvm-config.
-fn llvm_config<I, S>(binary: &Path, args: I) -> String
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
+fn llvm_config(binary: &Path, args: &[&str]) -> String {
     llvm_config_ex(binary, args).expect("Surprising failure from llvm-config")
 }
 
@@ -234,36 +231,86 @@ where
 ///
 /// Explicit version of the `llvm_config` function that bubbles errors
 /// up.
-fn llvm_config_ex<I, S>(binary: &Path, args: I) -> anyhow::Result<String>
+fn llvm_config_ex(binary: &Path, args: &[&str]) -> anyhow::Result<String>
 where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
 {
-    let mut cmd = Command::new(binary);
-    (|| {
-        let Output {
-            status,
-            stdout,
-            stderr,
-        } = cmd.args(args).output()?;
-        let stdout = String::from_utf8(stdout).context("stdout")?;
-        let stderr = String::from_utf8(stderr).context("stderr")?;
-        if status.success() {
-            Ok(stdout)
+    let host = env::var("HOST")?;
+    let target = env::var("TARGET")?;
+
+    let output = if host != target {
+        // Wrap the llvm-config command in the user-space emulator when cross-compiling.
+
+        // Use the binary path (`llvm-config`) as the first argument.
+        let mut args = args
+            .iter()
+            .map(|arg| arg.to_string())
+            .collect::<Vec<String>>();
+        args.insert(0, binary.to_string_lossy().to_string());
+
+        // Determine the user-space emulator (e.g. `qemu-aarch64`).
+        let binary = if let Some(emulator) = option_env!("LLVM_SYS_USER_SPACE_EMULATOR") {
+            PathBuf::from(emulator)
+        } else if target.starts_with("aarch64") {
+            which("qemu-aarch64").context("could not find qemu-aarch64 binary")?
+        } else if target.starts_with("riscv64") {
+            which("qemu-riscv64").context("could not find qemu-riscv64 binary")?
         } else {
-            Err(anyhow::anyhow!(
-                "status={status}\nstdout={}\nstderr={}",
-                stdout.trim(),
-                stderr.trim()
-            ))
-        }
-    })()
-    .with_context(|| format!("{cmd:?}"))
+            return Err(anyhow::anyhow!("could not determine the user-space emulator for target {target}, please use `LLVM_SYS_USER_SPACE_EMULATOR` environment variable"));
+        };
+
+        // Determine the LD prefix (e.g. `/usr/lib/aarch64-linux-gnu`).
+        let ld_prefixes = if let Some(sysroot) = option_env!("LLVM_SYS_CROSS_LD_PREFIX") {
+            sysroot
+        } else if target.starts_with("aarch64") {
+            if target_env_is("musl") {
+                // Default path of the LD prefix on Alpine.
+                "/usr/aarch64-none-elf"
+            } else {
+                // Default path of the LD prefix on Debian.
+                "/usr/lib/aarch64-linux-gnu"
+            }
+        } else if target.starts_with("riscv64") {
+            if target_env_is("musl") {
+                // Default path of the LD prefix on Alpine.
+                "/usr/riscv64-none-elf"
+            } else {
+                // Default path of the LD prefix on Debian.
+                "/usr/lib/riscv64-linux-gnu"
+            }
+        } else {
+            return Err(anyhow::anyhow!("could not determine the sysroot emulator for target {target}, please use `LLVM_SYS_SYSROOT` environment variable"));
+        };
+
+        args.insert(0, "-L".to_string());
+        args.insert(1, ld_prefixes.to_string());
+
+        Command::new(binary).args(args).output()
+    } else {
+        // Call llvm-config directly when building natively.
+        Command::new(binary).args(args).output()
+    };
+
+    let Output {
+        status,
+        stdout,
+        stderr,
+    } = output?;
+    let stdout = String::from_utf8(stdout).context("stdout")?;
+    let stderr = String::from_utf8(stderr).context("stderr")?;
+    if status.success() {
+        Ok(stdout)
+    } else {
+        Err(anyhow::anyhow!(
+            "status={status}\nstdout={}\nstderr={}",
+            stdout.trim(),
+            stderr.trim()
+        ))
+    }
 }
 
 /// Get the LLVM version using llvm-config.
 fn llvm_version(binary: &Path) -> anyhow::Result<Version> {
-    let version_str = llvm_config_ex(binary, ["--version"])?;
+    let version_str = llvm_config_ex(binary, &["--version"])?;
 
     // LLVM isn't really semver and uses version suffixes to build
     // version strings like '3.8.0svn', so limit what we try to parse
@@ -294,7 +341,7 @@ fn get_system_libraries(llvm_config_path: &Path, kind: LibraryKind) -> Vec<Strin
         LibraryKind::Dynamic => "--link-shared",
     };
 
-    llvm_config(llvm_config_path, ["--system-libs", link_arg])
+    llvm_config(llvm_config_path, &["--system-libs", link_arg])
         .split(&[' ', '\n'] as &[char])
         .filter(|s| !s.is_empty())
         .map(|flag| {
@@ -496,7 +543,7 @@ fn get_link_libraries(
             LibraryKind::Static => "--link-static",
             LibraryKind::Dynamic => "--link-shared",
         };
-        llvm_config_ex(llvm_config_path, ["--libnames", link_arg])
+        llvm_config_ex(llvm_config_path, &["--libnames", link_arg])
     }
 
     let LinkingPreferences {
@@ -626,7 +673,7 @@ impl LinkingPreferences {
 }
 
 fn get_llvm_cflags(llvm_config_path: &Path) -> String {
-    let output = llvm_config(llvm_config_path, ["--cflags"]);
+    let output = llvm_config(llvm_config_path, &["--cflags"]);
 
     // llvm-config includes cflags from its own compilation with --cflags that
     // may not be relevant to us. In particularly annoying cases, these might
@@ -650,7 +697,7 @@ fn get_llvm_cflags(llvm_config_path: &Path) -> String {
 
 fn is_llvm_debug(llvm_config_path: &Path) -> bool {
     // Has to be either Debug or Release
-    llvm_config(llvm_config_path, ["--build-mode"]).contains("Debug")
+    llvm_config(llvm_config_path, &["--build-mode"]).contains("Debug")
 }
 
 fn main() {
@@ -691,7 +738,7 @@ fn main() {
         return;
     }
 
-    let libdir = llvm_config(&llvm_config_path, ["--libdir"]);
+    let libdir = llvm_config(&llvm_config_path, &["--libdir"]);
 
     // Export information to other crates
     println!("cargo:config_path={}", llvm_config_path.display()); // will be DEP_LLVM_CONFIG_PATH
