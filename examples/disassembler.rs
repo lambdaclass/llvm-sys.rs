@@ -63,7 +63,7 @@ fn disassemble_bytes<W: Write>(
                 x.as_mut_ptr(),
                 x.len() as u64,
                 pc,
-                sbuf.as_mut_ptr() as *mut i8,
+                sbuf.as_mut_ptr(),
                 sbuf.len(),
             )
         };
@@ -72,7 +72,7 @@ fn disassemble_bytes<W: Write>(
         }
 
         let instr_str = unsafe { CStr::from_ptr(sbuf.as_ptr()) };
-        write!(out, "{}\n", instr_str.to_string_lossy())?;
+        writeln!(out, "{}", instr_str.to_string_lossy())?;
 
         pc += sz as u64;
         x = &mut x[sz..];
