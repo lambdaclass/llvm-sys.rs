@@ -2,6 +2,11 @@ image: rust:1
 
 variables:
   LLVM_SYS_191_FFI_WORKAROUND: "YES"
+  # Commit in github.com/rust-lang/rust which corresponds to the newest LLVM.
+  # Rust CI hosts tarballs with their LLVM builds, which are more up to date
+  # than packages in distros where we can't use LLVM's nightly packages
+  # (e.g. Alpine), which are usually one version behind.
+  RUSTC_COMMIT: 41dd149fd6a6a06795fc6b9f54cb49af2f61775f
 
 .build_definition:
   script: &default_build_script
@@ -10,8 +15,8 @@ variables:
     - cargo run --example nop-function
     - echo "Hello, world!" | cargo run --example disassembler
 
-# Test on Alpine, using `unknown-linux-musl` LLVM tarballs provided by Rust CI.
-# These tarballs are the same ones which Rust nightly uses.
+# Test on Alpine, using `unknown-linux-musl` LLVM tarball provided by Rust CI.
+# The tarball is the same ones which Rust nightly uses.
 #
 # Unfortunately, Alpine doesn't package rc releases of LLVM and the stable
 # versions usually land months after the release.
@@ -19,11 +24,6 @@ test:alpine-rustc-llvm-tarball:
   image: rust:alpine3.20
   variables:
     LLVM_SYS_191_PREFIX: /usr/lib/llvm-rustc
-    # Commit in github.com/rust-lang/rust which corresponds to the newest LLVM.
-    # Rust CI hosts tarballs with their LLVM builds, which are more up to date
-    # than packages in distros where we can't use LLVM's nightly packages
-    # (e.g. Alpine), which are usually one version behind.
-    RUSTC_COMMIT: 41dd149fd6a6a06795fc6b9f54cb49af2f61775f
   before_script:
     # LLVM from Rust CI, even for the musl targets, is linked against libgcc_s
     # and libstdc++, not compiler-rt nor libc++.
@@ -49,5 +49,33 @@ test:debian:
     # LLJIT uses `dlopen()` to open the shared libLLVM library. Therefore, we
     # run the JIT test only on environments where we link dynamically.
     - cargo run --example jit-function
+  extends:
+    - .build_definition
+
+# Test cross-compilation to aarch64 on Debian, using `unknown-linux-gnu` LLVM
+# tarball provided by Rust CI. The tarball is the same one which Rust nightly
+# uses.
+test:debian-rustc-llvm-tarball-cross-aarch64:
+  image: rust:bookworm
+  variables:
+    LLVM_SYS_191_PREFIX: /usr/lib/llvm-rustc
+    CARGO_BUILD_TARGET: aarch64-unknown-linux-gnu
+  before_script:
+    - dpkg --add-architecture arm64
+    - |
+      apt-get update -qq && apt-get install -qq -y \
+        gcc-aarch64-linux-gnu \
+        g++-aarch64-linux-gnu \
+        libc6-dev-arm64-cross \
+        libffi-dev:arm64 \
+        libstdc++6:arm64 \
+        qemu-user
+    - rustup target add $CARGO_BUILD_TARGET
+    - mkdir -p /usr/lib/llvm-rustc
+    - |
+      wget -q -O - "https://ci-artifacts.rust-lang.org/rustc-builds/${RUSTC_COMMIT}/rust-dev-nightly-${CARGO_BUILD_TARGET}.tar.xz" | \
+      tar -xJ --strip-components 2 -C /usr/lib/llvm-rustc
+  script:
+    - *default_build_script
   extends:
     - .build_definition
